@@ -1,9 +1,7 @@
-from crypto.keygen import create_key
+from crypto.qr import get_qr
 
 def main():
-    pvk, pbk = create_key()
-    print("Private Key:", pvk)
-    print("Public Key:", pbk)
+    get_qr()
 
 
 if __name__ == "__main__":
