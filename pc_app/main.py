@@ -1,7 +1,7 @@
-from crypto.qr import get_qr
+from crypto.qr import generate_qr
 
 def main():
-    get_qr()
+    generate_qr()
 
 
 if __name__ == "__main__":
