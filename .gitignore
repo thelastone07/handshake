@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .env 
+.pytest_cache/
 
 /pc_app/venv/
 /pc_app/dist/
