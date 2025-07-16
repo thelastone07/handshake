@@ -22,7 +22,7 @@ def generate_qr():
     """
     makes a QR code with public key| IP address | port number and saves it as PNG file
     """
-    pbk, _ = create_key()
+    _ , pbk = create_key()
     hex_pbk = pbk.encode().hex()
 
     if is_available(LOCAL_PORT):
