@@ -21,6 +21,7 @@ def get_public_ip():
     try :
         s.connect(('8.8.8.8',80))
         ip = s.getsockname()[0]
+        print(ip)
     finally:
         s.close()
     return ip
