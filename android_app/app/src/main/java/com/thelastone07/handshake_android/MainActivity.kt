@@ -27,6 +27,10 @@ import kotlin.concurrent.thread
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
+import java.security.PublicKey
+
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
 
 
 
@@ -37,7 +41,7 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
 
-        // Ask for permission
+        // Ask for camera permission
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -56,7 +60,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-fun connectToPC(ip: String, port: Int, onResult: (String) -> Unit) {
+
+fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> Unit) {
+    //run in background
     thread {
         try {
             // Generate 32-byte random challenge
@@ -67,18 +73,21 @@ fun connectToPC(ip: String, port: Int, onResult: (String) -> Unit) {
 
             // Create socket with timeout
             val socket = Socket().apply {
-                soTimeout = 5000  // 5-second read timeout
+                soTimeout = 10000  // 5-second read timeout
                 connect(InetSocketAddress(ip, port), 5000)  // 5-second connection timeout
             }
+            val message = "HELLO|$challengeHex\n"
 
             socket.use {  // Auto-close resource
                 val out = it.getOutputStream()
                 val input = it.getInputStream()
 
                 // Send challenge with explicit encoding
-                val message = "HELLO|$challengeHex\n"
+
                 out.write(message.toByteArray(Charsets.UTF_8))
                 out.flush()
+
+
 
                 // Read 64-byte signature with guaranteed length
                 val signatureBytes = ByteArray(64).apply {
@@ -89,9 +98,12 @@ fun connectToPC(ip: String, port: Int, onResult: (String) -> Unit) {
                         bytesRead += read
                     }
                 }
-
-                // Return success only after full verification
-                onResult("Handshake success. Signature: ${signatureBytes.joinToString("") { "%02x".format(it) }}")
+                val hexSignature = signatureBytes.joinToString("") { "%02x".format(it) }
+                val publicKeyBytes = hexToBytes(publicKey)
+//                val publicKeyBytes = publicKey.toByteArray(Charsets.UTF_8)
+                val isValid = verifySignature(publicKeyBytes, challenge, signatureBytes)
+//                 Return success only after full verification
+                onResult("isValid $isValid")
             }
         } catch (e: SocketTimeoutException) {
             onResult("Timeout error: ${e.message}")
@@ -103,7 +115,19 @@ fun connectToPC(ip: String, port: Int, onResult: (String) -> Unit) {
     }
 }
 
+fun hexToBytes(hex: String): ByteArray {
+    return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+}
 
+fun verifySignature(publicKeyBytes : ByteArray, message : ByteArray, signatureBytes: ByteArray): Boolean {
+    val publicKey = Ed25519PublicKeyParameters(publicKeyBytes, 0)
+    val verifier = Ed25519Signer()
+
+    verifier.init(false,publicKey)
+    verifier.update(message, 0, message.size)
+
+    return verifier.verifySignature(signatureBytes)
+}
 
 @Composable
 fun QRScannerUI() {
@@ -132,7 +156,7 @@ fun QRScannerUI() {
                         port = parts[2].trim()
                         scannedData = result.text
 
-                        connectToPC(ipAddress, port.toInt()) {
+                        connectToPC(ipAddress, port.toInt(), publicKey) {
                             handshakeResult = it
                         }
                     } else {

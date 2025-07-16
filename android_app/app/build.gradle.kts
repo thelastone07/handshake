@@ -58,4 +58,5 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     implementation(libs.codescanner)
+    implementation(libs.bcprov.jdk18on)
 }
