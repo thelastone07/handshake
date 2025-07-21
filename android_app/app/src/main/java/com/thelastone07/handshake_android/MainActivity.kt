@@ -32,6 +32,16 @@ import java.security.PublicKey
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
+import kotlin.concurrent.thread
+
+import java.io.InputStream
+
 
 
 class MainActivity : ComponentActivity() {
@@ -60,6 +70,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+var lastClipboardText = ""
+var lastClipboardTextRec = ""
 
 fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> Unit) {
     //run in background
@@ -98,12 +110,15 @@ fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> 
                         bytesRead += read
                     }
                 }
+
                 val hexSignature = signatureBytes.joinToString("") { "%02x".format(it) }
                 val publicKeyBytes = hexToBytes(publicKey)
 //                val publicKeyBytes = publicKey.toByteArray(Charsets.UTF_8)
                 val isValid = verifySignature(publicKeyBytes, challenge, signatureBytes)
 //                 Return success only after full verification
-                onResult("isValid $isValid")
+                val result = if (isValid) "Successful" else "Unsuccessful"
+
+                onResult("Handshake $result ✅")
             }
         } catch (e: SocketTimeoutException) {
             onResult("Timeout error: ${e.message}")
@@ -114,6 +129,187 @@ fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> 
         }
     }
 }
+
+fun startListening(context: Context, ipAddress: String, port: Int) {
+    try {
+        val socket = Socket().apply {
+            soTimeout = 0 // keep socket open indefinitely
+            connect(InetSocketAddress(ipAddress, port))
+        }
+
+        val input = socket.getInputStream()
+
+        for (packet in readPackets(input)) {
+            try {
+                val decoded = decodeData(packet)
+                if (decoded.size < 8) continue // Invalid header size
+
+                val header = decoded.copyOfRange(0, 8)
+                val payload = decoded.copyOfRange(8, decoded.size)
+
+                val (msgType, fmt, size) = unpackMessageHeader(header)
+
+                if (msgType == 'T'.code.toByte() && fmt.contentEquals("txt".toByteArray())) {
+                    val message = payload.toString(Charsets.UTF_8)
+                    lastClipboardTextRec = message
+
+                    // Update clipboard
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("Received Text", message)
+                    clipboard.setPrimaryClip(clip)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+
+fun startSending(context: Context,ipAddress: String, port: Int) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+    try {
+        val socket = Socket().apply {
+            soTimeout = 0
+            connect(InetSocketAddress(ipAddress, port))
+        }
+        val output = socket.getOutputStream()
+
+        while (true) {
+            val clip = clipboard.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val text = clip.getItemAt(0).text?.toString() ?: ""
+
+                if (text.isNotEmpty() &&
+                    text != lastClipboardText &&
+                    text != lastClipboardTextRec
+                ) {
+                    val dataBytes = text.toByteArray(Charsets.UTF_8)
+                    val header = packMessageHeader('T'.code.toByte(), "txt".toByteArray(), dataBytes.size)
+                    val fullMessage = header + dataBytes
+                    val encoded = encodeData(fullMessage)
+
+                    output.write(encoded)
+                    output.flush()
+
+                    lastClipboardText = text
+                }
+            }
+
+            Thread.sleep(500) // Sleep before next check
+        }
+
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun readPackets(input : InputStream, stopByte: Byte = 0x00, bufferSize: Int = 1024): Sequence<ByteArray> = sequence {
+    val buffer = ByteArray(bufferSize)
+    var data = ByteArray(0)
+
+    while (true) {
+        val bytesRead = input.read(buffer)
+        if (bytesRead == -1) break
+
+        data += buffer.copyOfRange(0, bytesRead)
+
+        var stopIndex = data.indexOf(stopByte)
+        while (stopIndex != -1) {
+            val packet = data.copyOfRange(0, stopIndex)
+            data = data.copyOfRange(stopIndex + 1, data.size)
+
+            if (packet.isNotEmpty()) {
+                yield(packet)
+            }
+
+            stopIndex = data.indexOf(stopByte)
+        }
+    }
+}
+
+
+fun encodeData(data: ByteArray): ByteArray {
+    val encoded = mutableListOf<Byte>()
+    var j = 0
+
+    while (j < data.size) {
+        val codeIndex = encoded.size
+        var codeLen: Int = 1
+        encoded.add(0) // Placeholder for code length
+
+        while (j < data.size && data[j] != 0.toByte() && codeLen < 255) {
+            encoded.add(data[j])
+            j++
+            codeLen++
+        }
+
+        encoded[codeIndex] = codeLen.toByte()
+
+        if (j < data.size && data[j] == 0.toByte()) {
+            j++ // Skip the zero
+        }
+    }
+
+    encoded.add(0) // Final zero
+    return encoded.toByteArray()
+}
+
+
+fun decodeData(data: ByteArray): ByteArray {
+    val decoded = mutableListOf<Byte>()
+    var j = 0
+
+    // Exclude the last trailing zero
+    val trimmedData = data.copyOf(data.size - 1)
+
+    while (j < trimmedData.size) {
+        val codeLen = trimmedData[j].toInt() and 0xFF // Unsigned byte
+        j++
+
+        for (i in 1 until codeLen) {
+            if (j < trimmedData.size) {
+                decoded.add(trimmedData[j])
+                j++
+            }
+        }
+
+        if (codeLen < 255 && j < trimmedData.size) {
+            decoded.add(0)
+        }
+    }
+
+    return decoded.toByteArray()
+}
+
+fun packMessageHeader(msgType: Byte, fmt: ByteArray, dataLength: Int): ByteArray {
+    require(fmt.size == 3) { "Format must be 3 bytes" }
+
+    val buffer = ByteBuffer.allocate(8) // 1 + 3 + 4 = 8 bytes
+    buffer.order(ByteOrder.BIG_ENDIAN)
+    buffer.put(msgType)       // c
+    buffer.put(fmt)           // 3s
+    buffer.putInt(dataLength) // I
+    return buffer.array()
+}
+
+fun unpackMessageHeader(header: ByteArray): Triple<Byte, ByteArray, Int> {
+    require(header.size == 8) { "Header must be exactly 8 bytes" }
+
+    val buffer = ByteBuffer.wrap(header)
+    buffer.order(ByteOrder.BIG_ENDIAN)
+
+    val msgType = buffer.get()             // c
+    val fmt = ByteArray(3) { buffer.get() } // 3s
+    val dataLength = buffer.int             // I
+
+    return Triple(msgType, fmt, dataLength)
+}
+
 
 fun hexToBytes(hex: String): ByteArray {
     return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
@@ -196,6 +392,19 @@ fun QRScannerUI() {
                     Text(handshakeResult)
                 }
 
+            }
+        }
+        LaunchedEffect(handshakeResult) {
+            if (handshakeResult == "Handshake Successful ✅") {
+                thread(start = true) {
+                    // Thread 1: Listen for incoming data
+                    startListening(context,ipAddress, port.toInt())
+                }
+
+                thread(start = true) {
+                    // Thread 2: Send outgoing data
+                    startSending(context ,ipAddress, port.toInt())
+                }
             }
         }
     }
