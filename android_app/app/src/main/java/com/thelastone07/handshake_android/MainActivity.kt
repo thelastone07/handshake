@@ -38,6 +38,8 @@ import java.nio.ByteOrder
 import android.content.Context
 import android.content.ClipboardManager
 import android.content.ClipData
+import android.os.Handler
+import android.os.Looper
 import kotlin.concurrent.thread
 
 import java.io.InputStream
@@ -130,43 +132,30 @@ fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> 
     }
 }
 
-fun startListening(context: Context, ipAddress: String, port: Int) {
+fun startListening(context: Context, ipAddress: String, port: Int, onMessage: (String) -> Unit) {
     try {
+        onMessage("hello world")
         val socket = Socket().apply {
             soTimeout = 0 // keep socket open indefinitely
             connect(InetSocketAddress(ipAddress, port))
         }
 
         val input = socket.getInputStream()
+        val buffer = ByteArray(1024)
 
-        for (packet in readPackets(input)) {
-            try {
-                val decoded = decodeData(packet)
-                if (decoded.size < 8) continue // Invalid header size
+        while (true) {
+            val bytesRead = input.read(buffer)
+            if (bytesRead == -1) break // connection closed by server
 
-                val header = decoded.copyOfRange(0, 8)
-                val payload = decoded.copyOfRange(8, decoded.size)
-
-                val (msgType, fmt, size) = unpackMessageHeader(header)
-
-                if (msgType == 'T'.code.toByte() && fmt.contentEquals("txt".toByteArray())) {
-                    val message = payload.toString(Charsets.UTF_8)
-                    lastClipboardTextRec = message
-
-                    // Update clipboard
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = ClipData.newPlainText("Received Text", message)
-                    clipboard.setPrimaryClip(clip)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            val message = buffer.copyOfRange(0, bytesRead).toString(Charsets.UTF_8)
+            onMessage(message)
         }
 
     } catch (e: Exception) {
         e.printStackTrace()
     }
 }
+
 
 
 fun startSending(context: Context,ipAddress: String, port: Int) {
@@ -208,29 +197,29 @@ fun startSending(context: Context,ipAddress: String, port: Int) {
     }
 }
 
-fun readPackets(input : InputStream, stopByte: Byte = 0x00, bufferSize: Int = 1024): Sequence<ByteArray> = sequence {
-    val buffer = ByteArray(bufferSize)
-    var data = ByteArray(0)
-
-    while (true) {
-        val bytesRead = input.read(buffer)
-        if (bytesRead == -1) break
-
-        data += buffer.copyOfRange(0, bytesRead)
-
-        var stopIndex = data.indexOf(stopByte)
-        while (stopIndex != -1) {
-            val packet = data.copyOfRange(0, stopIndex)
-            data = data.copyOfRange(stopIndex + 1, data.size)
-
-            if (packet.isNotEmpty()) {
-                yield(packet)
-            }
-
-            stopIndex = data.indexOf(stopByte)
-        }
-    }
-}
+//fun readPackets(input : InputStream, stopByte: Byte = 0x00, bufferSize: Int = 1024): Sequence<ByteArray> = sequence {
+//    val buffer = ByteArray(bufferSize)
+//    var data = ByteArray(0)
+//
+//    while (true) {
+//        val bytesRead = input.read(buffer)
+//        if (bytesRead == -1) break
+//
+//        data += buffer.copyOfRange(0, bytesRead)
+//
+//        var stopIndex = data.indexOf(stopByte)
+//        while (stopIndex != -1) {
+//            val packet = data.copyOfRange(0, stopIndex)
+//            data = data.copyOfRange(stopIndex + 1, data.size)
+//
+//            if (packet.isNotEmpty()) {
+//                yield(packet)
+//            }
+//
+//            stopIndex = data.indexOf(stopByte)
+//        }
+//    }
+//}
 
 
 fun encodeData(data: ByteArray): ByteArray {
@@ -337,6 +326,11 @@ fun QRScannerUI() {
 
     var handshakeResult by remember { mutableStateOf("") }
 
+    var receivedMessage by remember {mutableStateOf("")}
+
+    val mainHandler = Handler(Looper.getMainLooper())
+
+
     if (showScanner) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -392,19 +386,30 @@ fun QRScannerUI() {
                     Text(handshakeResult)
                 }
 
+                if (receivedMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("📨 Latest Message:")
+                    Text(receivedMessage)
+                }
+
+
             }
         }
         LaunchedEffect(handshakeResult) {
             if (handshakeResult == "Handshake Successful ✅") {
                 thread(start = true) {
                     // Thread 1: Listen for incoming data
-                    startListening(context,ipAddress, port.toInt())
+                    startListening(context,ipAddress, port.toInt()) { msg ->
+                        mainHandler.post{
+                            receivedMessage = msg
+                        }
+                    }
                 }
 
-                thread(start = true) {
-                    // Thread 2: Send outgoing data
-                    startSending(context ,ipAddress, port.toInt())
-                }
+//                thread(start = true) {
+//                    // Thread 2: Send outgoing data
+//                    startSending(context ,ipAddress, port.toInt())
+//                }
             }
         }
     }
