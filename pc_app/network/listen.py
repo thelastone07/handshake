@@ -1,9 +1,7 @@
 import socket
 from network.port_info import LOCAL_PORT, get_public_ip
 from crypto.keygen import sign_challenge
-import time
-import threading
-import pyperclip
+import time, struct, threading, pyperclip
 
 def read_initial(soc, buffer=1024)->bytes:
     try:
@@ -18,6 +16,28 @@ def read_initial(soc, buffer=1024)->bytes:
 text = pyperclip.paste()
 text_rec = ""
 
+def format_msg(data : bytes,msg_type :bytes,fmt :bytes)->bytes:
+   header = struct.pack('!c3sI', msg_type, fmt, len(data))
+   data = header + data
+   return encode_data(data)
+
+def encode_data(data: bytes) -> bytes:
+  encoded = bytearray()
+  j = 0
+  while j < len(data):
+    code_idx = len(encoded)
+    code_len = 1
+    encoded.append(0)
+    while j < len(data) and data[j] != 0 and code_len < 255:
+      encoded.append(data[j])
+      j = j + 1
+      code_len = code_len + 1
+    encoded[code_idx] = code_len
+    if j < len(data) and data[j] == 0:
+      j = j + 1
+  encoded.append(0)
+  return bytes(encoded)
+
 def send(soc):
     print('i am listening')
     try:
@@ -30,12 +50,16 @@ def send(soc):
                 print(curr)
                 message = curr.encode()
                 print(message)
+                message = format_msg(message, b'T', b'txt')
+                print(message)
                 soc.sendall(message)
             else:
                 time.sleep(0.5)
             text = curr
     except Exception as e:
         print("Error or client disconnected: ", e)
+    except KeyboardInterrupt:
+        print("no more talking. keyboard has spoken")
     finally:
         print("Closing connection...")
         soc.close()

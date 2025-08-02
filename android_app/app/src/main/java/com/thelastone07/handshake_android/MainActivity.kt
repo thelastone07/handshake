@@ -148,8 +148,14 @@ fun startListening(context: Context, socket: Socket, onMessage: (String) -> Unit
             val bytesRead = input.read(buffer)
             if (bytesRead == -1) break // connection closed by server
 
-            val message = buffer.copyOfRange(0, bytesRead).toString(Charsets.UTF_8)
-            onMessage(message)
+            var message = buffer.copyOfRange(0, bytesRead)
+
+            message = decodeData(message)
+            onMessage(message.toString(Charsets.UTF_8))
+
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("", message.toString(Charsets.UTF_8))
+            clipboard.setPrimaryClip(clip)
         }
 
     } catch (e: Exception) {
@@ -253,9 +259,11 @@ fun encodeData(data: ByteArray): ByteArray {
 fun decodeData(data: ByteArray): ByteArray {
     val decoded = mutableListOf<Byte>()
     var j = 0
-
     // Exclude the last trailing zero
-    val trimmedData = data.copyOf(data.size - 1)
+
+    val trimmedData = data.copyOfRange(0,data.size-1)
+
+
 
     while (j < trimmedData.size) {
         val codeLen = trimmedData[j].toInt() and 0xFF // Unsigned byte
@@ -272,8 +280,9 @@ fun decodeData(data: ByteArray): ByteArray {
             decoded.add(0)
         }
     }
+    val payload = decoded.toByteArray().copyOfRange(8,decoded.size)
 
-    return decoded.toByteArray()
+    return payload
 }
 
 fun packMessageHeader(msgType: Byte, fmt: ByteArray, dataLength: Int): ByteArray {
@@ -287,14 +296,14 @@ fun packMessageHeader(msgType: Byte, fmt: ByteArray, dataLength: Int): ByteArray
     return buffer.array()
 }
 
-fun unpackMessageHeader(header: ByteArray): Triple<Byte, ByteArray, Int> {
+fun unpackMessageHeader(header: ByteArray): Triple<Byte, String, Int> {
     require(header.size == 8) { "Header must be exactly 8 bytes" }
 
     val buffer = ByteBuffer.wrap(header)
     buffer.order(ByteOrder.BIG_ENDIAN)
 
-    val msgType = buffer.get()             // c
-    val fmt = ByteArray(3) { buffer.get() } // 3s
+    val msgType = buffer.get()       // c
+    val fmt = ByteArray(3) { buffer.get() }.toString(Charsets.UTF_8) // 3s
     val dataLength = buffer.int             // I
 
     return Triple(msgType, fmt, dataLength)
