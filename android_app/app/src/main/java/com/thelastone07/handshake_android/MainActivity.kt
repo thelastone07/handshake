@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
 var lastClipboardText = ""
 var lastClipboardTextRec = ""
 
-fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> Unit) {
+fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> Unit, onConnected : (Socket)->Unit) {
     //run in background
     thread {
         try {
@@ -87,14 +87,14 @@ fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> 
 
             // Create socket with timeout
             val socket = Socket().apply {
-                soTimeout = 10000  // 5-second read timeout
-                connect(InetSocketAddress(ip, port), 5000)  // 5-second connection timeout
+                soTimeout = 0  // 5-second read timeout
+                connect(InetSocketAddress(ip, port))  // 5-second connection timeout
             }
             val message = "HELLO|$challengeHex\n"
 
-            socket.use {  // Auto-close resource
-                val out = it.getOutputStream()
-                val input = it.getInputStream()
+
+                val out = socket.getOutputStream()
+                val input = socket.getInputStream()
 
                 // Send challenge with explicit encoding
 
@@ -121,7 +121,12 @@ fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> 
                 val result = if (isValid) "Successful" else "Unsuccessful"
 
                 onResult("Handshake $result ✅")
+            if (isValid) {
+                onConnected(socket)
+            } else {
+                socket.close()
             }
+
         } catch (e: SocketTimeoutException) {
             onResult("Timeout error: ${e.message}")
         } catch (e: IOException) {
@@ -132,13 +137,9 @@ fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> 
     }
 }
 
-fun startListening(context: Context, ipAddress: String, port: Int, onMessage: (String) -> Unit) {
+fun startListening(context: Context, socket: Socket, onMessage: (String) -> Unit) {
     try {
         onMessage("hello world")
-        val socket = Socket().apply {
-            soTimeout = 0 // keep socket open indefinitely
-            connect(InetSocketAddress(ipAddress, port))
-        }
 
         val input = socket.getInputStream()
         val buffer = ByteArray(1024)
@@ -327,6 +328,7 @@ fun QRScannerUI() {
     var handshakeResult by remember { mutableStateOf("") }
 
     var receivedMessage by remember {mutableStateOf("")}
+    var connectedSocket by remember {mutableStateOf<Socket?>(null)}
 
     val mainHandler = Handler(Looper.getMainLooper())
 
@@ -346,9 +348,10 @@ fun QRScannerUI() {
                         port = parts[2].trim()
                         scannedData = result.text
 
-                        connectToPC(ipAddress, port.toInt(), publicKey) {
-                            handshakeResult = it
-                        }
+                        connectToPC(ipAddress, port.toInt(), publicKey,
+                            onResult = { handshakeResult = it},
+                            onConnected = {socket -> connectedSocket = socket}
+                        )
                     } else {
                         Toast.makeText(ctx, "Invalid QR format", Toast.LENGTH_SHORT).show()
                     }
@@ -395,22 +398,18 @@ fun QRScannerUI() {
 
             }
         }
-        LaunchedEffect(handshakeResult) {
-            if (handshakeResult == "Handshake Successful ✅") {
+        LaunchedEffect(connectedSocket) {
+            connectedSocket?.let { socket ->
                 thread(start = true) {
                     // Thread 1: Listen for incoming data
-                    startListening(context,ipAddress, port.toInt()) { msg ->
-                        mainHandler.post{
+                    startListening(context, socket) { msg ->
+                        mainHandler.post {
                             receivedMessage = msg
                         }
                     }
                 }
-
-//                thread(start = true) {
-//                    // Thread 2: Send outgoing data
-//                    startSending(context ,ipAddress, port.toInt())
-//                }
             }
         }
+
     }
 }
