@@ -21,6 +21,23 @@ def format_msg(data : bytes,msg_type :bytes,fmt :bytes)->bytes:
    data = header + data
    return encode_data(data)
 
+def decode_data(data:bytes) ->bytes:
+  data = data[:-1]
+  decoded = bytearray()
+  j = 0
+  while j < len(data):
+    code_len = data[j]
+  
+    j = j + 1
+    decoded += data[j:j+code_len-1]
+
+    j = j + code_len - 1
+
+    if code_len < 255 and j < len(data): 
+      decoded.append(0)
+    
+  return bytes(decoded)
+
 def encode_data(data: bytes) -> bytes:
   encoded = bytearray()
   j = 0
@@ -39,7 +56,6 @@ def encode_data(data: bytes) -> bytes:
   return bytes(encoded)
 
 def send(soc):
-    print('i am listening')
     try:
         while True:
             global text, text_rec
@@ -64,6 +80,29 @@ def send(soc):
         print("Closing connection...")
         soc.close()
                 
+
+def rec(soc):
+    global text_rec
+    
+    try :
+        while True:
+            print("i am listening kind of")
+            buffer = soc.recv(1024)
+
+            if not buffer:
+                continue
+            decoded = decode_data(buffer)
+            message = decoded.decode('utf-8')
+            print("Received message : ", message)
+
+            text_rec = message
+            pyperclip.copy(message)
+
+    except Exception as e:
+        print("i can't read this :",e)
+    finally :
+        print("no mroe reading")
+        soc.close()
 
 
 def listen():
@@ -95,7 +134,14 @@ def listen():
         print("signature can't send :", e)
 
 
-    thread = threading.Thread(target=send, args=(soc,))
-    thread.start()
+    sthread = threading.Thread(target=send, args=(soc,))
+    sthread.start()
+
+    # rthread = threading.Thread(target=rec, args=(soc,))
+    # rthread.start()
+    while True :
+        data = read_initial(soc) 
+        print(data.decode())
+        
 
 

@@ -38,8 +38,11 @@ import java.nio.ByteOrder
 import android.content.Context
 import android.content.ClipboardManager
 import android.content.ClipData
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat.startForegroundService
+import java.io.ByteArrayOutputStream
 import kotlin.concurrent.thread
 
 import java.io.InputStream
@@ -142,20 +145,28 @@ fun startListening(context: Context, socket: Socket, onMessage: (String) -> Unit
         onMessage("hello world")
 
         val input = socket.getInputStream()
-        val buffer = ByteArray(1024)
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
         while (true) {
-            val bytesRead = input.read(buffer)
-            if (bytesRead == -1) break // connection closed by server
+            val buffer = ByteArrayOutputStream()
+            val temp = ByteArray(1024)
 
-            var message = buffer.copyOfRange(0, bytesRead)
+
+            while (true) {
+                val bytesRead = input.read(temp)
+                if (bytesRead == -1) break // connection closed by server
+                buffer.write(temp, 0, bytesRead)
+                if (temp[bytesRead - 1] == 0.toByte()) break
+            }
+            var message = buffer.toByteArray()
 
             message = decodeData(message)
             onMessage(message.toString(Charsets.UTF_8))
-
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            lastClipboardTextRec = message.toString(Charsets.UTF_8)
             val clip = ClipData.newPlainText("", message.toString(Charsets.UTF_8))
             clipboard.setPrimaryClip(clip)
+            Thread.sleep(500)
+
         }
 
     } catch (e: Exception) {
@@ -163,70 +174,52 @@ fun startListening(context: Context, socket: Socket, onMessage: (String) -> Unit
     }
 }
 
-
-
-fun startSending(context: Context,ipAddress: String, port: Int) {
+fun startSending(context: Context, socket: Socket, onSent: (String) -> Unit) {
+    startForegroundService(Intent(context, ClipboardService::class.java))
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-
+    val output = socket.getOutputStream()
+    val clip1 = clipboard.primaryClip
+    if (clip1 != null && clip1.itemCount > 0)
+        lastClipboardText = clip1.getItemAt(0).text?.toString() ?: ""
     try {
-        val socket = Socket().apply {
-            soTimeout = 0
-            connect(InetSocketAddress(ipAddress, port))
-        }
-        val output = socket.getOutputStream()
 
         while (true) {
             val clip = clipboard.primaryClip
             if (clip != null && clip.itemCount > 0) {
-                val text = clip.getItemAt(0).text?.toString() ?: ""
+                val curr = clip.getItemAt(0).text?.toString() ?: ""
 
-                if (text.isNotEmpty() &&
-                    text != lastClipboardText &&
-                    text != lastClipboardTextRec
-                ) {
-                    val dataBytes = text.toByteArray(Charsets.UTF_8)
-                    val header = packMessageHeader('T'.code.toByte(), "txt".toByteArray(), dataBytes.size)
-                    val fullMessage = header + dataBytes
-                    val encoded = encodeData(fullMessage)
+                val shouldSend = curr.isNotEmpty() &&
+                        curr != lastClipboardText &&
+                        curr != lastClipboardTextRec
+
+                if (shouldSend) {
+                    println(curr)
+
+                    val message = curr.toByteArray(Charsets.UTF_8)
+                    val formatted = formatMessage(message, 'T'.code.toByte(), "txt")
+                    val encoded = encodeData(formatted)
+
 
                     output.write(encoded)
                     output.flush()
 
-                    lastClipboardText = text
+                    onSent(curr)
+
+                    lastClipboardText = curr
                 }
             }
 
-            Thread.sleep(500) // Sleep before next check
+            Thread.sleep(500)
         }
 
     } catch (e: Exception) {
-        e.printStackTrace()
+        println("Error or client disconnected: $e")
+    } finally {
+        println("Closing connection...")
+        socket.close()
     }
 }
 
-//fun readPackets(input : InputStream, stopByte: Byte = 0x00, bufferSize: Int = 1024): Sequence<ByteArray> = sequence {
-//    val buffer = ByteArray(bufferSize)
-//    var data = ByteArray(0)
-//
-//    while (true) {
-//        val bytesRead = input.read(buffer)
-//        if (bytesRead == -1) break
-//
-//        data += buffer.copyOfRange(0, bytesRead)
-//
-//        var stopIndex = data.indexOf(stopByte)
-//        while (stopIndex != -1) {
-//            val packet = data.copyOfRange(0, stopIndex)
-//            data = data.copyOfRange(stopIndex + 1, data.size)
-//
-//            if (packet.isNotEmpty()) {
-//                yield(packet)
-//            }
-//
-//            stopIndex = data.indexOf(stopByte)
-//        }
-//    }
-//}
 
 
 fun encodeData(data: ByteArray): ByteArray {
@@ -285,6 +278,13 @@ fun decodeData(data: ByteArray): ByteArray {
     return payload
 }
 
+
+fun formatMessage(message: ByteArray, msgType: Byte, format: String): ByteArray {
+    val header = packMessageHeader(msgType, format.toByteArray(), message.size)
+    return header + message
+}
+
+
 fun packMessageHeader(msgType: Byte, fmt: ByteArray, dataLength: Int): ByteArray {
     require(fmt.size == 3) { "Format must be 3 bytes" }
 
@@ -337,6 +337,8 @@ fun QRScannerUI() {
     var handshakeResult by remember { mutableStateOf("") }
 
     var receivedMessage by remember {mutableStateOf("")}
+    var sentMessage by remember {mutableStateOf("")}
+
     var connectedSocket by remember {mutableStateOf<Socket?>(null)}
 
     val mainHandler = Handler(Looper.getMainLooper())
@@ -403,6 +405,12 @@ fun QRScannerUI() {
                     Text("📨 Latest Message:")
                     Text(receivedMessage)
                 }
+                if (sentMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("📨 Latest Message:")
+                    Text(sentMessage)
+                }
+
 
 
             }
@@ -415,6 +423,14 @@ fun QRScannerUI() {
                         mainHandler.post {
                             receivedMessage = msg
                         }
+                    }
+                }
+                thread(start = true) {
+                    startSending(context, socket) { msg ->
+                        mainHandler.post {
+                            sentMessage = msg
+                        }
+
                     }
                 }
             }
