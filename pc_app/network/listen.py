@@ -86,15 +86,14 @@ def rec(soc):
     
     try :
         while True:
-            print("i am listening kind of")
             buffer = soc.recv(1024)
 
             if not buffer:
                 continue
             decoded = decode_data(buffer)
             message = decoded.decode('utf-8')
+            message = message[8:]
             print("Received message : ", message)
-
             text_rec = message
             pyperclip.copy(message)
 
@@ -109,39 +108,36 @@ def listen():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     ip = get_public_ip()
     server.bind((f'{ip}', LOCAL_PORT))
-    server.listen(1)
+    server.listen(5)
+    while True : 
+        soc, addr = server.accept()
 
-    soc, addr = server.accept()
+        #receive first message 
+        try :
+            data = read_initial(soc).decode()
+            data = data.rstrip('\n').split('|')[1]
+            signature = sign_challenge(bytes.fromhex(data))
 
-    #receive first message 
-    try :
-        data = read_initial(soc).decode()
-        data = data.rstrip('\n').split('|')[1]
-        signature = sign_challenge(bytes.fromhex(data))
+            if not isinstance(signature, bytes):
+                raise ValueError("sign not bytes")
+            if len(signature) != 64:
+                raise ValueError("sign not 64 in length")
 
-        if not isinstance(signature, bytes):
-            raise ValueError("sign not bytes")
-        if len(signature) != 64:
-            raise ValueError("sign not 64 in length")
+        except Exception as e:
+            print("error while reading initial data :", e)
 
-    except Exception as e:
-        print("error while reading initial data :", e)
-
-    #send intial message
-    try :
-        soc.sendall(signature) 
-    except Exception as e:
-        print("signature can't send :", e)
+        #send intial message
+        try :
+            soc.sendall(signature) 
+        except Exception as e:
+            print("signature can't send :", e)
 
 
-    sthread = threading.Thread(target=send, args=(soc,))
-    sthread.start()
+        sthread = threading.Thread(target=send, args=(soc,))
+        sthread.start()
 
-    # rthread = threading.Thread(target=rec, args=(soc,))
-    # rthread.start()
-    while True :
-        data = read_initial(soc) 
-        print(data.decode())
-        
+        rthread = threading.Thread(target=rec, args=(soc,))
+        rthread.start()
+    
 
 

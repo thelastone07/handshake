@@ -41,12 +41,15 @@ import android.content.ClipData
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
-import androidx.core.content.ContextCompat.startForegroundService
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.window.Dialog
 import java.io.ByteArrayOutputStream
-import kotlin.concurrent.thread
 
-import java.io.InputStream
-
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
 
 
 class MainActivity : ComponentActivity() {
@@ -79,7 +82,7 @@ var lastClipboardText = ""
 var lastClipboardTextRec = ""
 
 fun connectToPC(ip: String, port: Int, publicKey: String ,onResult: (String) -> Unit, onConnected : (Socket)->Unit) {
-    //run in background
+    onResult("i am in")
     thread {
         try {
             // Generate 32-byte random challenge
@@ -175,7 +178,6 @@ fun startListening(context: Context, socket: Socket, onMessage: (String) -> Unit
 }
 
 fun startSending(context: Context, socket: Socket, onSent: (String) -> Unit) {
-    startForegroundService(Intent(context, ClipboardService::class.java))
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val output = socket.getOutputStream()
     val clip1 = clipboard.primaryClip
@@ -344,6 +346,25 @@ fun QRScannerUI() {
     val mainHandler = Handler(Looper.getMainLooper())
 
 
+    var showPastConnections by remember { mutableStateOf(false) }
+
+    val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+    val savedConnections = remember { mutableStateListOf<String>() }
+    LaunchedEffect(Unit) {
+        val stored = prefs.getStringSet("connections", emptySet()) ?: emptySet()
+        savedConnections.clear()
+        savedConnections.addAll(stored.toList().takeLast(3).reversed())
+
+    }
+
+    fun saveConnection(ip: String, port: String, key: String) {
+        val entry = "$key|$ip|$port"
+        val updated = LinkedHashSet<String>(prefs.getStringSet("connections", emptySet()))
+        updated.remove(entry)  // remove if exists to re-add at top
+        updated.add(entry)
+        prefs.edit().putStringSet("connections", updated.toList().takeLast(3).toSet()).apply()
+    }
+
     if (showScanner) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -384,38 +405,155 @@ fun QRScannerUI() {
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Button(onClick = { showScanner = true }) {
-                Text("Connect")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Button(onClick = { showScanner = true }) {
+                    Text("Connect")
+                }
+
+                Button(onClick = { showPastConnections = true }) {
+                    Text("Past Connections")
+                }
             }
 
-            if (scannedData.isNotEmpty()) {
-                Text("✅ Scanned Successfully:")
-                Text("Public Key: $publicKey")
-                Text("IP: $ipAddress")
-                Text("Port: $port")
 
-                if (handshakeResult.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("🔐 Handshake Result:")
-                    Text(handshakeResult)
+            if (showPastConnections) {
+                Dialog(onDismissRequest = { showPastConnections = false }) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 8.dp
+                    ) {
+                        Box(modifier = Modifier.padding(16.dp)) {
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "Select Past Connection",
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    IconButton(onClick = { showPastConnections = false }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Close")
+                                    }
+                                }
+
+                                if (savedConnections.isEmpty()) {
+                                    Text(
+                                        "No previous connections 😵",
+                                        modifier = Modifier.padding(top = 16.dp)
+                                    )
+                                } else {
+                                    savedConnections.forEach { entry ->
+                                        val parts = entry.split("|")
+                                        if (parts.size == 3) {
+                                            val pk = parts[0]
+                                            val ip1 = parts[1]
+                                            val port1 = parts[2]
+                                            Button(
+                                                onClick = {
+                                                    connectToPC(ip1, port1.toInt(), pk,
+                                                        onResult = { handshakeResult = it},
+                                                        onConnected = {socket -> connectedSocket = socket})
+                                                    showPastConnections = false
+                                                    publicKey = pk
+                                                    ipAddress = ip1
+                                                    port = port1
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp)
+                                            ) {
+                                                Text("🔗 $ip1:$port1")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+
+
+
+            if (handshakeResult.isNotEmpty()) {
+                Text("🔐 Current Connection:")
+                Text("\uD83D\uDD17 $ipAddress|$port")
+
+
+                val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+                val maxBoxHeight = screenHeight * 0.8f  // 30% of screen height
 
                 if (receivedMessage.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("📨 Latest Message:")
-                    Text(receivedMessage)
+                    Text(
+                        "📨 Latest Received Message:",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = maxBoxHeight)
+                            .background(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            receivedMessage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            maxLines = 10,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
+
                 if (sentMessage.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("📨 Latest Message:")
-                    Text(sentMessage)
+                    Text(
+                        "📤 Latest Sent Message:",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = maxBoxHeight)
+                            .background(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            sentMessage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            maxLines = 10,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
 
+                if (handshakeResult.contains("Successful")) {
+                    saveConnection(ipAddress, port, publicKey)
+                }
 
             }
         }
         LaunchedEffect(connectedSocket) {
+
             connectedSocket?.let { socket ->
                 thread(start = true) {
                     // Thread 1: Listen for incoming data
