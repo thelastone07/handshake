@@ -1,7 +1,12 @@
-import os 
+import os , sys 
 from nacl.signing import SigningKey, VerifyKey
 
-ROOT = os.getcwd()
+def resource_path(rel_path):
+    base_path = getattr(sys,'_MEIPASS',os.path.abspath("."))
+    return os.path.join(base_path, rel_path)
+
+
+ROOT = resource_path(os.getcwd())
 CRYPTO = os.path.join(ROOT, 'crypto')
 KEY = os.path.join(CRYPTO, 'keys')
 PVKEY = os.path.join(KEY, 'private_key.key')

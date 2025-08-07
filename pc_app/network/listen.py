@@ -109,9 +109,8 @@ def listen():
     ip = get_public_ip()
     server.bind((f'{ip}', LOCAL_PORT))
     server.listen(5)
-    while True : 
+    while True: 
         soc, addr = server.accept()
-
         #receive first message 
         try :
             data = read_initial(soc).decode()
@@ -125,19 +124,21 @@ def listen():
 
         except Exception as e:
             print("error while reading initial data :", e)
+            server.close() 
 
         #send intial message
         try :
             soc.sendall(signature) 
         except Exception as e:
             print("signature can't send :", e)
-
+            server.close()
 
         sthread = threading.Thread(target=send, args=(soc,))
         sthread.start()
 
         rthread = threading.Thread(target=rec, args=(soc,))
         rthread.start()
+    
     
 
 

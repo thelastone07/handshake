@@ -1,6 +1,12 @@
 import qrcode
 from crypto.keygen import create_key
 from network.port_info import get_public_ip, is_available, LOCAL_PORT
+import os, sys 
+
+def resource_path(rel_path):
+    base_path = getattr(sys,'_MEIPASS',os.path.abspath("."))
+    return os.path.join(base_path, rel_path)
+
 
 def create_qr(s, output_path = 'assets/qr_code.png'):
     """
@@ -16,7 +22,7 @@ def create_qr(s, output_path = 'assets/qr_code.png'):
     qr.make(fit=True)
 
     img = qr.make_image(fill_color="black", back_color="white")
-    img.save(output_path)
+    img.save(resource_path(output_path))
 
 def generate_qr():
     """
