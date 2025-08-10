@@ -1,6 +1,6 @@
 # handshake
 
-A TCP-based data sharing service implemented from scratch using Python and Kotlin. A ```ED25519``` based sign is exchanged for more layered authentication. Data is encoded via ```COBS``` for persistent communication. 
+A TCP-based data sharing service implemented from scratch using Python and Kotlin. A ```ED25519``` based sign is exchanged for more layered authentication. Data is encoded via ```COBS``` for persistent communication. Find documentation [here]('documentation.md').
 
 ## Features 
 1. Enables clipboard sharing across android and a windows device.
@@ -33,7 +33,7 @@ A TCP-based data sharing service implemented from scratch using Python and Kotli
 - Now, you can start sharing data across clipboard.
 - Laptop service stays on indefinitely. The mobile service turns off after a period of 20s of inactivity. 
 - In case of such inactivity, just click on past connections and you are connected instantly.
-- Android versions 10+ doesn't allow applications to access your clipboard using background service. In order to send clipboard data from your phone to windows, you have to open the application after copying the data. Vice versa is not applicable. 
+- Android versions 8+ doesn't allow applications to access your clipboard using background service. In order to send clipboard data from your phone to windows, you have to open the application after copying the data. Vice versa is not applicable. 
 
 ### Notes
 - If there is a warning of missing DLLs, please raise an issue. 
