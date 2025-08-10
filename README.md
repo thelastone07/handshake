@@ -1,6 +1,6 @@
 # handshake
 
-A TCP-based data sharing service implemented from scratch using Python and Kotlin. A ```ED25519``` based sign is exchanged for more layered authentication. Data is encoded via ```COBS``` for persistent communication. Find documentation [here]('documentation.md').
+A TCP-based data sharing service implemented from scratch using Python and Kotlin. A ```ED25519``` based sign is exchanged for more layered authentication. Data is encoded via ```COBS``` for persistent communication. Find documentation [here](documentation.md).
 
 ## Features 
 1. Enables clipboard sharing across android and a windows device.
